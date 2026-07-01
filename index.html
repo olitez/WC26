@@ -44,7 +44,6 @@
   }
   .stage svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
   .conn{fill:none;stroke:var(--line);stroke-width:2.2;stroke-linejoin:round;stroke-linecap:round}
-  .dot{fill:var(--line)}
   .center-line{stroke:var(--line);stroke-width:2.2}
 
   /* Flags are HTML imgs positioned over the SVG so circular clipping is trivial */
@@ -66,6 +65,10 @@
   .flag.r3{width:5.0%}
   .flag.r4{width:5.0%}
   .flag.champ{width:9%;border-color:var(--gold);box-shadow:0 0 0 3px var(--gold),0 2px 8px rgba(0,0,0,.3)}
+  /* Undetermined future match: small visible dot with a larger invisible hit area,
+     so it's easy to hover/tap while staying visually light. Carries the schedule tooltip. */
+  .flag.dot{width:3%;background:radial-gradient(circle, var(--line) 34%, transparent 37%);
+    border-color:transparent;box-shadow:none;cursor:help}
   .flag.eliminated{filter:grayscale(1) opacity(.85)}
   .flag.win{border-color:var(--gold)}
   .flag.pop{animation:pop .55s cubic-bezier(.2,1.5,.4,1)}
@@ -378,7 +381,6 @@ function render(model){
 
   // Build connectors + dots/winner-flags for every match node
   let conns = "";
-  let dots = "";
   const nodeNums = [...R32_NUMS, 89,90,91,92,93,94,95,96,97,98,99,100,101,102,104];
   for (const num of nodeNums){
     const lvl = levelOf(num);
@@ -398,7 +400,11 @@ function render(model){
       flags.push({x,y,team:w,cls:`r${lvl}${pop}`,
                   tip: nextNum!=null ? tipFor(model,nextNum) : tipFor(model,num)});
     } else {
-      dots += `<circle class="dot" cx="${x}" cy="${y}" r="3.4"/>`;
+      // No team yet: render a small hoverable dot instead of a winner flag, so the
+      // match's schedule is reachable even before either participant is known. An
+      // empty team routes through the neutral-placeholder branch below, carrying the
+      // same data-round/teams/when the tooltip system reads for real flags.
+      flags.push({x,y,team:"",cls:"dot",tip:tipFor(model,num)});
     }
   }
 
@@ -417,8 +423,8 @@ function render(model){
     center += trophySVG();
   }
 
-  // Assemble SVG (lines + dots + trophy) then the flag overlay
-  let html = `<svg viewBox="0 0 1000 1000" role="img">${conns}${center}${dots}</svg>`;
+  // Assemble SVG (lines + trophy) then the flag overlay (flags include future-match dots)
+  let html = `<svg viewBox="0 0 1000 1000" role="img">${conns}${center}</svg>`;
   const allFlags = champFlag ? flags.concat([champFlag]) : flags;
   for (const fl of allFlags){
     const w = fl.cls.indexOf("champ")>=0 ? "w320" : "w160";
@@ -428,7 +434,10 @@ function render(model){
     const t = fl.tip || {round:"",teams:fl.team,score:"",when:""};
     const data = `data-round="${escapeAttr(t.round)}" data-teams="${escapeAttr(t.teams)}" `+
                  `data-score="${escapeAttr(t.score||"")}" data-when="${escapeAttr(t.when||"")}"`;
-    if (src){
+    if (fl.cls.indexOf("dot")>=0){
+      // future match with no team yet: line-colored dot (CSS), tooltip via data-*
+      html += `<div class="flag ${fl.cls}" ${data} style="left:${left}%;top:${top}%"></div>`;
+    } else if (src){
       // on image error, fall back to a neutral circle so the bracket never gaps
       html += `<img class="flag ${fl.cls}" src="${src}" alt="${fl.team}" ${data} loading="lazy"
                  style="left:${left}%;top:${top}%" onerror="this.removeAttribute('src');this.style.background='#cfc9bd'"/>`;
