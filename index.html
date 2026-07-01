@@ -12,6 +12,7 @@
     --line:#2a2823;
     --muted:#9a948a;
     --gold:#c8a24a;
+    --bronze:#b08d57;
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%}
@@ -71,6 +72,10 @@
     border-color:transparent;box-shadow:none;cursor:help}
   .flag.eliminated{filter:grayscale(1)}
   .flag.win{border-color:var(--gold)}
+  /* Third-place play-off: a small pairing below the final. Bronze border on the winner. */
+  .flag.tp{width:4.4%}
+  .flag.tp.win{border-color:var(--bronze);box-shadow:0 0 0 2px var(--bronze),0 1px 4px rgba(0,0,0,.25)}
+  .tp-label{fill:var(--muted);font-size:21px;font-weight:700;letter-spacing:1.6px;text-anchor:middle;font-family:inherit}
   .flag.pop{animation:pop .55s cubic-bezier(.2,1.5,.4,1)}
   @keyframes pop{0%{transform:translate(-50%,-50%) scale(.1);opacity:0}60%{transform:translate(-50%,-50%) scale(1.18)}100%{transform:translate(-50%,-50%) scale(1);opacity:1}}
 
@@ -96,6 +101,49 @@
   .tooltip .tt-score{margin-top:3px;font-size:16px;font-weight:800}
   .tooltip .tt-score.pending{font-size:12px;font-weight:500;color:#cfc9bd}
 
+  /* Schedule table: knockout matches yesterday → tomorrow, grouped by local day */
+  .schedule{
+    width:min(94vw, 86vh, 920px);
+    margin:2px auto 12px;
+    display:flex;flex-direction:column;gap:12px;
+  }
+  .schedule[hidden]{display:none}
+  .sched-day-h{
+    font-size:10px;letter-spacing:.7px;text-transform:uppercase;font-weight:700;
+    color:var(--gold);margin-bottom:5px;
+  }
+  .sched-date{color:var(--muted);text-transform:none;letter-spacing:0;font-weight:600}
+  .sched-row{
+    display:flex;align-items:center;gap:10px;
+    padding:7px 11px;border-radius:10px;
+    background:rgba(28,27,24,.045);
+    font-size:14px;
+  }
+  .sched-row + .sched-row{margin-top:5px}
+  .sched-round{
+    flex:0 0 auto;min-width:30px;
+    font-size:10px;font-weight:700;letter-spacing:.5px;
+    color:var(--muted);text-transform:uppercase;
+  }
+  .sched-teams{display:flex;align-items:center;gap:6px;flex:1 1 auto;flex-wrap:wrap}
+  .sched-flag{
+    width:20px;height:20px;border-radius:50%;object-fit:cover;background:#fff;
+    box-shadow:0 1px 2px rgba(0,0,0,.15);flex:0 0 auto;
+  }
+  .sched-tbd{background:#cfc9bd;box-shadow:none}
+  .sched-name{font-weight:600}
+  .sched-name.tbd{color:var(--muted);font-weight:500}
+  .sched-sep{color:var(--muted);font-weight:700;margin:0 2px;white-space:nowrap}
+  .sched-meta{flex:0 0 auto;display:flex;align-items:center;gap:7px;color:var(--muted);font-weight:600}
+  .sched-time{font-variant-numeric:tabular-nums;white-space:nowrap}
+  .sched-live{
+    font-size:9px;font-weight:800;letter-spacing:.6px;color:#fff;
+    background:#c0563c;padding:2px 6px;border-radius:6px;text-transform:uppercase;
+    animation:livepulse 1.6s ease-in-out infinite;
+  }
+  @keyframes livepulse{0%,100%{opacity:1}50%{opacity:.45}}
+  .sched-row.live{background:rgba(192,86,60,.10)}
+
   footer{
     color:var(--muted);font-size:12.5px;text-align:center;
     padding:2px 12px 22px;line-height:1.5;
@@ -113,6 +161,8 @@
   </header>
 
   <div class="stage" id="stage" aria-label="World Cup 2026 knockout bracket"></div>
+
+  <section class="schedule" id="schedule" aria-label="Matches from yesterday to tomorrow" hidden></section>
 
   <footer>
     <div><span class="status-dot" id="statusDot"></span><span id="status">Loading…</span></div>
@@ -285,6 +335,13 @@ function buildModel(feed){
     if (idx!=null && p[idx]) w = p[idx];
     return (_w[num] = w);
   }
+  // The team that lost a resolved match (null while undecided).
+  function loser(num){
+    const w = winner(num);
+    if (!w) return null;
+    const p = participants(num);
+    return p[0]===w ? p[1] : p[0];
+  }
   for (const numStr of [...R32_NUMS, 89,90,91,92,93,94,95,96,97,98,99,100,101,102,104]){
     const num = +numStr;
     const p = participants(num);
@@ -292,6 +349,17 @@ function buildModel(feed){
     const sc = m.score;
     node[num] = { participants:p, winner:winner(num), score:sc, label:scoreLabel(sc),
                   date:m.date||"", time:m.time||"" };
+  }
+  // Third-place play-off (num 103): sits outside the radial tree. The feed labels
+  // its sides "L101"/"L102" (semi-final losers), so resolve the real teams ourselves;
+  // the score's winner index then maps 0->loser(101), 1->loser(102).
+  {
+    const p = [loser(101), loser(102)];
+    const m = feed[103] || {};
+    const sc = m.score;
+    const idx = winnerIndex(sc);
+    node[103] = { participants:p, winner:(idx!=null && p[idx]) ? p[idx] : null,
+                  score:sc, label:scoreLabel(sc), date:m.date||"", time:m.time||"" };
   }
   return node;
 }
@@ -301,22 +369,28 @@ const stage = document.getElementById("stage");
 let prevWinners = {}; // num -> winner team, for diff/pop animation
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-function kickoff(node){ // "2026-06-28" + "12:00 UTC-7" -> local time, e.g. "28 Jun, 22:00 GMT+3"
-  if (!node.date) return "Not played yet";
+// Feed gives venue-local time with an embedded offset ("HH:MM UTC±H"); rebuild a
+// real instant so callers can render it in the viewer's own time zone. null if the
+// match has no date, or date/time don't match the expected format.
+function matchInstant(node){
+  if (!node || !node.date) return null;
   const dm = node.date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  // Feed gives venue-local time with an embedded offset ("HH:MM UTC±H");
-  // rebuild a real instant and render it in the viewer's own time zone.
   const tm = node.time && node.time.match(/^(\d{1,2}):(\d{2})\s*UTC([+-]\d{1,2})(?::?(\d{2}))?$/);
-  if (dm && tm){
-    const [, hh, mm, offH, offM] = tm;
-    const sign = offH[0];
-    const absH = String(Math.abs(+offH)).padStart(2,"0");
-    const d = new Date(`${node.date}T${hh.padStart(2,"0")}:${mm}:00${sign}${absH}:${offM||"00"}`);
-    if (!isNaN(d)) return d.toLocaleString([], {
-      weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit", timeZoneName:"short"
-    });
-  }
+  if (!dm || !tm) return null;
+  const [, hh, mm, offH, offM] = tm;
+  const sign = offH[0];
+  const absH = String(Math.abs(+offH)).padStart(2,"0");
+  const d = new Date(`${node.date}T${hh.padStart(2,"0")}:${mm}:00${sign}${absH}:${offM||"00"}`);
+  return isNaN(d) ? null : d;
+}
+function kickoff(node){ // "2026-06-28" + "12:00 UTC-7" -> local time, e.g. "Sun, 28 Jun, 22:00 GMT+3"
+  if (!node.date) return "Not played yet";
+  const d = matchInstant(node);
+  if (d) return d.toLocaleString([], {
+    weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit", timeZoneName:"short"
+  });
   // Fallback: unexpected format -> keep the original verbatim display.
+  const dm = node.date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   const day = dm ? `${+dm[3]} ${MONTHS[+dm[2]-1]}` : node.date;
   return node.time ? `${day} · ${node.time}` : day;
 }
@@ -423,6 +497,27 @@ function render(model){
     center += trophySVG();
   }
 
+  // Third-place play-off (num 103): a small pairing directly below the final. The
+  // bottom of the tree is empty (both semis open upward), so it slots in cleanly.
+  // Winner gets a bronze border; the other side greys out; unresolved sides are dots.
+  const tp = model[103];
+  const TPY = CY + 150, TPDX = 60;
+  const tpPos = [[CX - TPDX, TPY], [CX + TPDX, TPY]];
+  center += `<line class="conn" x1="${tpPos[0][0]}" y1="${TPY}" x2="${tpPos[1][0]}" y2="${TPY}"/>`+
+            `<text class="tp-label" x="${CX}" y="${TPY + 48}">3RD PLACE</text>`;
+  const tpTip = tipFor(model, 103);
+  tp.participants.forEach((team, i)=>{
+    const [x,y] = tpPos[i];
+    if (team){
+      const isWin = tp.winner === team;
+      const pop = (isWin && prevWinners[103] !== team) ? " pop" : "";
+      if (isWin) newWinners[103] = team;
+      flags.push({x, y, team, cls:`tp ${isWin?"win":"eliminated"}${pop}`, tip:tpTip});
+    } else {
+      flags.push({x, y, team:"", cls:"dot", tip:tpTip});
+    }
+  });
+
   // Assemble SVG (lines + trophy) then the flag overlay (flags include future-match dots)
   let html = `<svg viewBox="0 0 1000 1000" role="img">${conns}${center}</svg>`;
   const allFlags = champFlag ? flags.concat([champFlag]) : flags;
@@ -451,8 +546,96 @@ function render(model){
 }
 
 function roundName(num){
+  if (num===103) return "Third place";
   const l = levelOf(num);
   return ["","Round of 32","Round of 16","Quarter-final","Semi-final","Final"][l];
+}
+function roundShort(num){
+  if (num===103) return "3rd";
+  return ["","R32","R16","QF","SF","F"][levelOf(num)];
+}
+
+/* ---- Schedule table: knockout matches in a rolling yesterday/today/tomorrow window,
+   grouped by the viewer's local day. Played matches show the result; upcoming ones
+   show the local kickoff time. Reuses the same model that backs the bracket. ---- */
+const scheduleEl = document.getElementById("schedule");
+// Late-night matches read as part of the previous evening's session, so the "day"
+// boundary sits at 05:00 local, not midnight: a 02:00 kickoff counts as the night
+// before. footballDay() maps any instant to the midnight of the day it belongs to.
+const DAY_START_HOUR = 5;
+function footballDay(d){
+  const s = new Date(d.getTime());
+  s.setHours(s.getHours() - DAY_START_HOUR);
+  return new Date(s.getFullYear(), s.getMonth(), s.getDate());
+}
+function localDayKey(d){ // Date -> "YYYY-MM-DD" in the viewer's local zone
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+function shortDate(d){ return `${d.getDate()} ${MONTHS[d.getMonth()]}`; }
+function schedTeam(team, flip){ // one side of a row: flag + name (flag trails when flip=true)
+  const name = team
+    ? `<span class="sched-name">${escapeHTML(team)}</span>`
+    : `<span class="sched-name tbd">TBD</span>`;
+  const src = team ? flagURL(team, "w40") : "";
+  const flag = src
+    ? `<img class="sched-flag" src="${src}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">`
+    : `<span class="sched-flag sched-tbd"></span>`;
+  return flip ? name + flag : flag + name;
+}
+function renderSchedule(model){
+  const now = new Date();
+  const today = footballDay(now);
+  const yest = new Date(today); yest.setDate(yest.getDate()-1);
+  const tom  = new Date(today); tom.setDate(tom.getDate()+1);
+  // football-day key -> bucket; anything outside these three days is ignored
+  const byKey = {};
+  const days = [
+    {key:localDayKey(yest),  date:yest,  label:"Yesterday", rows:[]},
+    {key:localDayKey(today), date:today, label:"Today",     rows:[]},
+    {key:localDayKey(tom),   date:tom,   label:"Tomorrow",  rows:[]},
+  ];
+  days.forEach(d => byKey[d.key] = d);
+
+  const nodeNums = [...R32_NUMS, 89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104];
+  for (const num of nodeNums){
+    const n = model[num];
+    const inst = matchInstant(n);
+    if (!inst) continue;
+    const bucket = byKey[localDayKey(footballDay(inst))];
+    if (!bucket) continue;
+    bucket.rows.push({num, node:n, inst});
+  }
+
+  const active = days.filter(d => d.rows.length);
+  if (!active.length){ scheduleEl.hidden = true; scheduleEl.innerHTML = ""; return; }
+
+  const LIVE_MS = 180*60*1000; // kickoff → +3h window (regular + ET + pens) for the LIVE flag
+  let html = "";
+  for (const d of active){
+    d.rows.sort((a,b)=> a.inst - b.inst); // earliest kickoff first within the day
+    html += `<div class="sched-day"><div class="sched-day-h">${d.label} <span class="sched-date">· ${shortDate(d.date)}</span></div>`;
+    for (const {num, node, inst} of d.rows){
+      const played = !!node.label;
+      // Feed has no live scores (git repo, lags), so LIVE is a clock-based guess:
+      // kicked off, no final score yet, still inside the plausible match window.
+      const live = !played && inst <= now && (now - inst) < LIVE_MS;
+      const sep = played ? node.label : "—"; // score between teams once played, else a dash
+      const timeStr = inst.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}); // shown for every row
+      html += `<div class="sched-row${live?" live":""}">`+
+        `<span class="sched-round">${roundShort(num)}</span>`+
+        `<span class="sched-teams">${schedTeam(node.participants[0], false)}`+
+          `<span class="sched-sep">${escapeHTML(sep)}</span>`+
+          `${schedTeam(node.participants[1], true)}</span>`+
+        `<span class="sched-meta">`+
+          (live ? `<span class="sched-live">LIVE</span>` : "")+
+          `<span class="sched-time">${escapeHTML(timeStr)}</span>`+
+        `</span>`+
+      `</div>`;
+    }
+    html += `</div>`;
+  }
+  scheduleEl.innerHTML = html;
+  scheduleEl.hidden = false;
 }
 function escapeAttr(s){ return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
 function escapeHTML(s){ return escapeAttr(s).replace(/>/g,"&gt;"); }
@@ -514,6 +697,7 @@ async function tick(){
     const model = buildModel(normalize(raw));
     lastGoodAt = new Date();
     render(model);
+    renderSchedule(model);
     stamp(true);
   }catch(err){
     // Never blank the bracket — keep last-good on screen, quiet retry (design §9)
