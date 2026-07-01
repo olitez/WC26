@@ -170,6 +170,14 @@ const CHILDREN = {
 const R32_NUMS = [73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88];
 const R32SET = new Set(R32_NUMS);
 
+/* Reverse of CHILDREN: match num -> its parent (the next-round match its winner
+   advances into). R32 leaves point at their R16 match; the Final (ROOT) has no
+   parent. Built once from CHILDREN so the two never drift apart. */
+const PARENT = {};
+for (const [p, kids] of Object.entries(CHILDREN)){
+  for (const c of kids) PARENT[c] = +p;
+}
+
 /* Ring level: R32 match node = 1 … Final = 5 (center). Flags live at level 0. */
 function levelOf(num){
   if (R32SET.has(num)) return 1;
@@ -369,7 +377,13 @@ function render(model){
     if (w){
       newWinners[num] = w;
       const pop = (prevWinners[num]!==w) ? " pop" : "";
-      flags.push({x,y,team:w,cls:`r${lvl}${pop}`, tip:tipFor(model,num)});
+      // A winner flag sits on the way toward the center, so its tooltip describes
+      // where the team goes NEXT (result if played, otherwise the schedule) rather
+      // than the match it already won. The match just won is still on the team's
+      // outer flag. PARENT[num] is the next-round match; fall back to num if absent.
+      const nextNum = PARENT[num];
+      flags.push({x,y,team:w,cls:`r${lvl}${pop}`,
+                  tip: nextNum!=null ? tipFor(model,nextNum) : tipFor(model,num)});
     } else {
       dots += `<circle class="dot" cx="${x}" cy="${y}" r="3.4"/>`;
     }
