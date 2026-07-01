@@ -298,10 +298,23 @@ const stage = document.getElementById("stage");
 let prevWinners = {}; // num -> winner team, for diff/pop animation
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-function kickoff(node){ // "2026-06-28" + "12:00 UTC-7" -> "28 Jun · 12:00 UTC-7"
+function kickoff(node){ // "2026-06-28" + "12:00 UTC-7" -> local time, e.g. "28 Jun, 22:00 GMT+3"
   if (!node.date) return "Not played yet";
-  const m = node.date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  const day = m ? `${+m[3]} ${MONTHS[+m[2]-1]}` : node.date;
+  const dm = node.date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  // Feed gives venue-local time with an embedded offset ("HH:MM UTC±H");
+  // rebuild a real instant and render it in the viewer's own time zone.
+  const tm = node.time && node.time.match(/^(\d{1,2}):(\d{2})\s*UTC([+-]\d{1,2})(?::?(\d{2}))?$/);
+  if (dm && tm){
+    const [, hh, mm, offH, offM] = tm;
+    const sign = offH[0];
+    const absH = String(Math.abs(+offH)).padStart(2,"0");
+    const d = new Date(`${node.date}T${hh.padStart(2,"0")}:${mm}:00${sign}${absH}:${offM||"00"}`);
+    if (!isNaN(d)) return d.toLocaleString([], {
+      day:"numeric", month:"short", hour:"2-digit", minute:"2-digit", timeZoneName:"short"
+    });
+  }
+  // Fallback: unexpected format -> keep the original verbatim display.
+  const day = dm ? `${+dm[3]} ${MONTHS[+dm[2]-1]}` : node.date;
   return node.time ? `${day} · ${node.time}` : day;
 }
 // tooltip fields for a match node (same match backs both its outer flags and its winner flag)
