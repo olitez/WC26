@@ -60,16 +60,16 @@
     cursor:default;
     transition:width .25s ease, height .25s ease;
   }
-  .flag.r0{width:6.6%}
-  .flag.r1{width:5.7%}
-  .flag.r2{width:5.2%}
-  .flag.r3{width:5.0%}
-  .flag.r4{width:5.0%}
+  /* Uniform flag size across every ring — rings sit ~80–98 units apart, wider than
+     a flag, so keeping the outer size inward stays collision-free and reads cleaner. */
+  .flag.r0,.flag.r1,.flag.r2,.flag.r3,.flag.r4{width:6.6%}
   .flag.champ{width:9%;border-color:var(--gold);box-shadow:0 0 0 3px var(--gold),0 2px 8px rgba(0,0,0,.3)}
   /* Undetermined future match: small visible dot with a larger invisible hit area,
      so it's easy to hover/tap while staying visually light. Carries the schedule tooltip. */
   .flag.dot{width:3%;background:radial-gradient(circle, var(--line) 34%, transparent 37%);
     border-color:transparent;box-shadow:none;cursor:help}
+  /* A team is greyed the moment it loses any match, and gold-bordered while it's
+     still advancing — so the surviving teams read as the champion's path inward. */
   .flag.eliminated{filter:grayscale(1)}
   .flag.win{border-color:var(--gold)}
   /* Third-place play-off: a small pairing below the final. Bronze border on the winner. */
@@ -442,14 +442,26 @@ function render(model){
   const newWinners = {};
   const flags = []; // {x,y,team,cls,title}
 
+  // Teams that have lost any played match — greyed everywhere they appear. The
+  // loser of every resolved node (R32 leaf or inner) is out of the tournament;
+  // everyone else is still on the champion's path and gets the gold border.
+  const eliminated = new Set();
+  const allNums = [...R32_NUMS, 89,90,91,92,93,94,95,96,97,98,99,100,101,102,104];
+  for (const num of allNums){
+    const n = model[num];
+    if (!n || !n.winner) continue;
+    const [a,b] = n.participants;
+    const lost = n.winner===a ? b : a;
+    if (lost) eliminated.add(lost);
+  }
+  const pathCls = team => eliminated.has(team) ? "eliminated" : "win";
+
   // 32 outer flags (always shown)
   FLAG_ORDER.forEach((f,i)=>{
     const team = (model[f.num].participants[f.slot]) || "";
     if (!team) return;
     const [x,y] = pt(RADIUS[0], flagAngle(i));
-    const win = model[f.num].winner;
-    const elim = win && win!==team; // this team lost its R32 match
-    flags.push({x,y,team,cls:"r0"+(elim?" eliminated":(win===team?" win":"")),
+    flags.push({x,y,team,cls:"r0 "+pathCls(team),
                 tip:tipFor(model,f.num)});
   });
 
@@ -471,7 +483,7 @@ function render(model){
       // than the match it already won. The match just won is still on the team's
       // outer flag. PARENT[num] is the next-round match; fall back to num if absent.
       const nextNum = PARENT[num];
-      flags.push({x,y,team:w,cls:`r${lvl}${pop}`,
+      flags.push({x,y,team:w,cls:`r${lvl} ${pathCls(w)}${pop}`,
                   tip: nextNum!=null ? tipFor(model,nextNum) : tipFor(model,num)});
     } else {
       // No team yet: render a small hoverable dot instead of a winner flag, so the
